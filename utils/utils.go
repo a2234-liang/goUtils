@@ -1,10 +1,20 @@
 package utils
 
 import (
+	"bytes"
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/md5"
+	"crypto/rand"
+	"crypto/rsa"
 	"crypto/sha1"
+	"crypto/sha256"
+	"crypto/x509"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
+	"errors"
 	"fmt"
 	"github.com/GUAIK-ORG/go-snowflake/snowflake"
 	"github.com/blevesearch/bleve/v2"
@@ -42,6 +52,10 @@ type options struct {
 	returnFields []string
 	jwtSecureKey string
 	cacheFolder  string
+	aes128Key    string
+	aes128Iv     string
+	publicKey    string
+	privateKey   string
 }
 type Option func(options *options)
 
@@ -88,6 +102,18 @@ func WithCacheFolder(folderName string) Option {
 func WithReturnField(field string) Option {
 	return func(o *options) {
 		o.returnFields = append(o.returnFields, field)
+	}
+}
+func WithAesKeyAndIv(key, iv string) Option {
+	return func(o *options) {
+		o.aes128Key = key
+		o.aes128Iv = iv
+	}
+}
+func WithPubicPrivateKey(publicKey, privateKey string) Option {
+	return func(o *options) {
+		o.publicKey = publicKey
+		o.privateKey = privateKey
 	}
 }
 
@@ -217,6 +243,13 @@ func SHA1(str string) string {
 	sha1v.Write([]byte(str))
 	str = hex.EncodeToString(sha1v.Sum(nil))
 	return str
+}
+
+// sha256加密
+func SHA256(data string) string {
+	hash := sha256.New()
+	hash.Write([]byte(data))
+	return hex.EncodeToString(hash.Sum(nil))
 }
 
 // md5加密
@@ -490,4 +523,121 @@ func BadgerExists(key string, opts ...Option) bool {
 		return e
 	})
 	return e == nil
+}
+
+// AES对称加密
+func Aes128Encrypt(str string, opts ...Option) (s string) {
+	defer func() {
+		if v := recover(); v != nil {
+			slog.Error("recover", v)
+			s = ""
+		}
+	}()
+	var (
+		op = options{aes128Key: "378f73a1aacefa60", aes128Iv: "73c5bc89799703e3"}
+	)
+	for _, option := range opts {
+		option(&op)
+	}
+	block, err := aes.NewCipher([]byte(op.aes128Key))
+	if err != nil {
+		panic(err.Error())
+	}
+	//填充内容，如果不足16位字符
+	blockSize := block.BlockSize()
+	originData := _pad([]byte(str), blockSize)
+	//加密方式
+	blockMode := cipher.NewCBCEncrypter(block, []byte(op.aes128Iv))
+	//加密，输出到[]byte数组
+	crypted := make([]byte, len(originData))
+	blockMode.CryptBlocks(crypted, originData)
+	return base64.StdEncoding.EncodeToString(crypted)
+}
+
+// AES对称解密
+func Aes128Decrypt(str string, opts ...Option) (s string) {
+	defer func() {
+		if v := recover(); v != nil {
+			slog.Error("recover", v)
+			s = ""
+		}
+	}()
+	var (
+		op = options{aes128Key: "378f73a1aacefa60", aes128Iv: "73c5bc89799703e3"}
+	)
+	for _, option := range opts {
+		option(&op)
+	}
+	decode_data, err := base64.StdEncoding.DecodeString(str)
+	if err != nil {
+		panic(err.Error())
+	}
+	//生成密码数据块cipher.Block
+	block, _ := aes.NewCipher([]byte(op.aes128Key))
+	//解密模式
+	blockMode := cipher.NewCBCDecrypter(block, []byte(op.aes128Iv))
+	//输出到[]byte数组
+	origin_data := make([]byte, len(decode_data))
+	blockMode.CryptBlocks(origin_data, decode_data)
+	//去除填充,并返回
+	return string(_unpad(origin_data))
+}
+
+func _pad(ciphertext []byte, blockSize int) []byte {
+	padding := blockSize - len(ciphertext)%blockSize
+	padtext := bytes.Repeat([]byte{byte(padding)}, padding)
+	return append(ciphertext, padtext...)
+}
+
+func _unpad(ciphertext []byte) []byte {
+	length := len(ciphertext)
+	//去掉最后一次的padding
+	unpadding := int(ciphertext[length-1])
+	return ciphertext[:(length - unpadding)]
+}
+
+// 非对称加密
+func RsaEncrypt(origData []byte, opts ...Option) ([]byte, error) {
+	var (
+		op = options{publicKey: "", privateKey: ""}
+	)
+	for _, option := range opts {
+		option(&op)
+	}
+	//解密pem格式的公钥
+	block, _ := pem.Decode([]byte(op.publicKey))
+	if block == nil {
+		return nil, errors.New("public key error")
+	}
+	// 解析公钥
+	pubInterface, err := x509.ParsePKIXPublicKey(block.Bytes)
+	if err != nil {
+		return nil, err
+	}
+	// 类型断言
+	pub := pubInterface.(*rsa.PublicKey)
+	//加密
+	return rsa.EncryptPKCS1v15(rand.Reader, pub, origData)
+}
+
+// 非对称解密
+func RsaDecrypt(ciphertext []byte, opts ...Option) ([]byte, error) {
+	var (
+		op = options{publicKey: "", privateKey: ""}
+	)
+	for _, option := range opts {
+		option(&op)
+	}
+	//解密
+	block, _ := pem.Decode([]byte(op.privateKey))
+	if block == nil {
+		return nil, errors.New("private key error!")
+	}
+	//解析PKCS1格式的私钥
+	priv, err := x509.ParsePKCS1PrivateKey(block.Bytes)
+	if err != nil {
+		return nil, err
+	}
+	// 解密
+	return rsa.DecryptPKCS1v15(rand.Reader, priv, ciphertext)
 }
