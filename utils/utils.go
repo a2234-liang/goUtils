@@ -525,6 +525,91 @@ func BadgerExists(key string, opts ...Option) bool {
 	return e == nil
 }
 
+// 批处理新增数据
+func BadgerBatch(dats []map[string]string, opts ...Option) error {
+	var (
+		op = options{}
+	)
+	for _, option := range opts {
+		option(&op)
+	}
+	txn := CacheDb[op.index].NewTransaction(true)
+	defer txn.Discard()
+	for i, v := range dats {
+		if value, o := v["key"]; o {
+			_ = txn.Set([]byte(value), []byte(v["value"]))
+		}
+
+		if i%5000 == 0 {
+			_ = txn.Commit()
+			txn = CacheDb[op.index].NewTransaction(true)
+		}
+	}
+	return txn.Commit()
+}
+
+// 从缓存中只查询对应的key
+func BadgerScanKeyOnly(prefix string, opts ...Option) ([]string, uint64, error) {
+	var (
+		op    = options{}
+		keys  []string
+		total uint64
+	)
+	for _, option := range opts {
+		option(&op)
+	}
+	e := CacheDb[op.index].View(func(txn *badger.Txn) error {
+		opts := badger.DefaultIteratorOptions
+		opts.PrefetchValues = false
+		it := txn.NewIterator(opts)
+		defer it.Close()
+		for it.Rewind(); it.Valid(); it.Next() {
+			item := it.Item()
+			if strings.HasPrefix(string(item.Key()), prefix) {
+				keys = append(keys, string(item.Key()))
+				total++
+			}
+		}
+		return nil
+	})
+	if e != nil {
+		return nil, 0, e
+	}
+	return keys, total, nil
+}
+
+// 从缓存中查询对应的key和值
+func BadgerScan(prefix string, opts ...Option) ([]map[string]any, uint64, error) {
+	var (
+		op    = options{}
+		total uint64
+		m     []map[string]any
+	)
+	for _, option := range opts {
+		option(&op)
+	}
+	e := CacheDb[op.index].View(func(txn *badger.Txn) error {
+		it := txn.NewIterator(badger.DefaultIteratorOptions)
+		defer it.Close()
+		prefix := []byte(prefix)
+		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
+			item := it.Item()
+			e := item.Value(func(v []byte) error {
+				m = append(m, map[string]any{"key": string(item.Key()), "value": string(v)})
+				return nil
+			})
+			if e != nil {
+				return e
+			}
+		}
+		return nil
+	})
+	if e != nil {
+		return nil, 0, e
+	}
+	return m, total, nil
+}
+
 // AES对称加密
 func Aes128Encrypt(str string, opts ...Option) (s string) {
 	defer func() {
