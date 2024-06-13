@@ -10,8 +10,20 @@ import (
 )
 
 /*
-*
- */
+<script>
+
+	if ('EventSource' in window) {
+	    let token = document.querySelector("#token").value
+	    var eventsoure = new EventSource(`http://127.0.0.1:8080/sse/${token}`,{ withCredentials: true })
+	    eventsoure.onmessage = function(event){
+	        console.log("message=", event.data)
+	    }
+	}else{
+	    document.write("No support eventsource")
+	}
+
+</script>
+*/
 var SseClients = make(map[string]chan string, 0)
 
 type SseHander struct {
