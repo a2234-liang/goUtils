@@ -2,6 +2,7 @@ package utils
 
 import (
 	"bytes"
+	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/md5"
@@ -24,19 +25,21 @@ import (
 	fileadapter "github.com/casbin/casbin/v2/persist/file-adapter"
 	"github.com/dgraph-io/badger/v4"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/redis/go-redis/v9"
 	"gorm.io/driver/mysql"
+	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 )
 
 var (
 	Db      *gorm.DB
+	Rdb     *redis.Client
 	Casbin  *casbin.Enforcer
 	Bleve   []bleve.Index
 	CacheDb []*badger.DB
@@ -56,9 +59,39 @@ type options struct {
 	aes128Iv     string
 	publicKey    string
 	privateKey   string
+	dsn          string
+	dbType       string
+	idleConns    int
+	maxConns     int
+	maxLifeTime  int
 }
 type Option func(options *options)
 
+func WithDbType(dbtype string) Option {
+	return func(options *options) {
+		options.dbType = dbtype
+	}
+}
+func WithIdleConns(idleConns int) Option {
+	return func(options *options) {
+		options.idleConns = idleConns
+	}
+}
+func WithmaxConns(maxConns int) Option {
+	return func(options *options) {
+		options.maxConns = maxConns
+	}
+}
+func WithMaxLifeTime(maxLifeTime int) Option {
+	return func(options *options) {
+		options.maxLifeTime = maxLifeTime
+	}
+}
+func WithDSN(dsn string) Option {
+	return func(options *options) {
+		options.dsn = dsn
+	}
+}
 func WithTotal(total int) Option {
 	return func(options *options) {
 		options.total = total
@@ -179,12 +212,26 @@ func InitBadger(opts ...Option) {
 }
 
 // 初始化mysql数据库
-func InitMariaDB(dbsParams map[string]any) {
+func InitGormDB(opts ...Option) {
 	var (
-		err error
-		DSN = dbsParams["Dsn"].(string)
+		op        = options{idleConns: 5, maxConns: 100, maxLifeTime: 8, dbType: "mariadb"}
+		err       error
+		dialector gorm.Dialector
 	)
-	if Db, err = gorm.Open(mysql.Open(DSN), &gorm.Config{
+	for _, option := range opts {
+		option(&op)
+	}
+	switch op.dbType {
+	case "postgres":
+		dialector = postgres.Open(op.dsn)
+	case "mariadb":
+		fallthrough
+	default:
+		dialector = mysql.Open(op.dsn)
+	}
+	if Db, err = gorm.Open(dialector, &gorm.Config{
+		//dsn=suwen:suwen@36D@tcp(127.0.0.1:3308)/project02?charset=utf8mb4&parseTime=True&loc=Local
+		//dsn=postgres://suwen:suwen@36D@127.0.0.1:5432/goadmin?Timezone=Asia/Shanghai
 		SkipDefaultTransaction: true,
 		PrepareStmt:            true,
 	}); err != nil {
@@ -192,25 +239,58 @@ func InitMariaDB(dbsParams map[string]any) {
 		os.Exit(1)
 	}
 	sqlDB, _ := Db.DB()
-	if dbsParams["idleConns"].(string) != "" {
-		n, _ := strconv.Atoi(dbsParams["idleConns"].(string))
-		sqlDB.SetMaxIdleConns(n)
-	} else {
-		sqlDB.SetMaxIdleConns(5) // SetMaxIdleConns sets the maximum number of connections in the idle connection pool.
+	sqlDB.SetMaxIdleConns(op.idleConns)
+	sqlDB.SetMaxOpenConns(op.maxConns)
+	sqlDB.SetConnMaxLifetime(time.Hour * time.Duration(op.maxLifeTime))
+	slog.Info("数据库初始化完成", "类型", op.dbType)
+}
+
+// 初始化postgresql数据库
+func InitPsqlDB(opts ...Option) {
+	var (
+		op  = options{idleConns: 5, maxConns: 100, maxLifeTime: 8}
+		err error
+	)
+	for _, option := range opts {
+		option(&op)
 	}
-	if dbsParams["maxConns"].(string) != "" {
-		n, _ := strconv.Atoi(dbsParams["maxConns"].(string))
-		sqlDB.SetMaxOpenConns(n)
-	} else {
-		sqlDB.SetMaxOpenConns(250) // SetMaxOpenConns sets the maximum number of open connections to the database.
+	if Db, err = gorm.Open(mysql.Open(op.dsn), &gorm.Config{
+		//dsn=suwen:suwen@36D@tcp(127.0.0.1:3308)/project02?charset=utf8mb4&parseTime=True&loc=Local
+		SkipDefaultTransaction: true,
+		PrepareStmt:            true,
+	}); err != nil {
+		slog.Error(err.Error())
+		os.Exit(1)
 	}
-	if dbsParams["maxLifeTime"].(string) != "" {
-		n, _ := strconv.Atoi(dbsParams["maxLifeTime"].(string))
-		sqlDB.SetConnMaxLifetime(time.Minute * time.Duration(n))
-	} else {
-		sqlDB.SetConnMaxLifetime(time.Hour * 6) // SetConnMaxLifetime sets the maximum amount of time a connection may be reused.
-	}
+	sqlDB, _ := Db.DB()
+	sqlDB.SetMaxIdleConns(op.idleConns)
+	sqlDB.SetMaxOpenConns(op.maxConns)
+	sqlDB.SetConnMaxLifetime(time.Hour * time.Duration(op.maxLifeTime))
 	slog.Info("数据库Mariadb初始化完成")
+}
+
+// 初始化redis数据库
+func InitRedis(opts ...Option) {
+	//url := "redis://user:password@localhost:6379/0?protocol=3"
+	var (
+		op = options{dsn: "redis://default:@127.0.0.1:6379/0?protocol=3"}
+	)
+	for _, option := range opts {
+		option(&op)
+	}
+	redisOpts, err := redis.ParseURL(op.dsn)
+	if err != nil {
+		slog.Error(err.Error())
+		os.Exit(1)
+	}
+	Rdb = redis.NewClient(redisOpts)
+	if _, err := Rdb.Ping(context.Background()).Result(); err != nil {
+		slog.Error(err.Error())
+		os.Exit(1)
+	} else {
+		slog.Info("数据库Redis初始化完成")
+	}
+
 }
 
 // 权限控制初始化
