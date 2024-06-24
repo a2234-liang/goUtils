@@ -50,9 +50,12 @@ type options struct {
 	total        int
 	index        int
 	ttl          int
+	page         int
+	pageSize     int
 	field        string
 	multikeyword []string
 	returnFields []string
+	sortFields   []string
 	jwtSecureKey string
 	cacheFolder  string
 	aes128Key    string
@@ -110,6 +113,21 @@ func WithIndex(index int) Option {
 func WithField(field string) Option {
 	return func(o *options) {
 		o.field = field
+	}
+}
+func WithPage(page int) Option {
+	return func(options *options) {
+		options.page = page
+	}
+}
+func WithPageSize(pagesize int) Option {
+	return func(options *options) {
+		options.pageSize = pagesize
+	}
+}
+func WithSortField(field string) Option {
+	return func(options *options) {
+		options.sortFields = append(options.sortFields, field)
 	}
 }
 func WithTtl(ttl int) Option {
@@ -419,7 +437,7 @@ func BleveSearch(s string, opts ...Option) ([]map[string]any, int64, error) {
 		total   int64
 		sResult *bleve.SearchResult
 		e       error
-		op      = options{field: "body", returnFields: []string{"body"}, index: 0}
+		op      = options{field: "Body", returnFields: []string{"Body"}, index: 0, sortFields: []string{}, page: 1, pageSize: 10}
 	)
 	for _, option := range opts {
 		option(&op)
@@ -441,7 +459,11 @@ func BleveSearch(s string, opts ...Option) ([]map[string]any, int64, error) {
 	//query := bleve.NewMatchPhraseQuery(s)
 	//query.SetField(op.field)
 	//query.SetBoost(10)
-	searchRequest := bleve.NewSearchRequest(boolQuery)
+	var searchRequest *bleve.SearchRequest
+	searchRequest = bleve.NewSearchRequestOptions(boolQuery, op.pageSize, (op.page-1)*op.pageSize, false)
+	if len(op.sortFields) > 0 {
+		searchRequest.SortBy(op.sortFields)
+	}
 	//searchRequest.Highlight = bleve.NewHighlight()
 	sResult, e = Bleve[op.index].Search(searchRequest)
 	if e != nil {
