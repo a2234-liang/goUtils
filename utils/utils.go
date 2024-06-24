@@ -419,12 +419,15 @@ func BleveSearch(s string, opts ...Option) ([]map[string]any, int64, error) {
 		total   int64
 		sResult *bleve.SearchResult
 		e       error
-		op      = options{field: "body", returnFields: []string{"body"}}
+		op      = options{field: "body", returnFields: []string{"body"}, index: 0}
 	)
 	for _, option := range opts {
 		option(&op)
 	}
 	op.multikeyword = append(op.multikeyword, s)
+	if op.index+1 > len(Bleve) {
+		return nil, 0, fmt.Errorf("引擎索引过界了")
+	}
 	boolQuery := bleve.NewBooleanQuery()
 	for _, v := range op.multikeyword {
 		query := bleve.NewMatchPhraseQuery(v)
@@ -470,6 +473,9 @@ func BleveIndex(id string, data map[string]any, opts ...Option) error {
 	for _, option := range opts {
 		option(&op)
 	}
+	if op.index+1 > len(Bleve) {
+		return fmt.Errorf("引擎索引过界了")
+	}
 	if e := Bleve[op.index].Index(id, data); e != nil {
 		slog.Error("", "错误", e.Error())
 		return e
@@ -487,6 +493,9 @@ func BleveRemove(id string, opts ...Option) error {
 	for _, option := range opts {
 		option(&op)
 	}
+	if op.index+1 > len(Bleve) {
+		return fmt.Errorf("引擎索引过界了")
+	}
 	e := Bleve[op.index].Delete(id)
 	return e
 }
@@ -499,6 +508,9 @@ func BleveDocument(id string, opts ...Option) (map[string]any, error) {
 	)
 	for _, option := range opts {
 		option(&op)
+	}
+	if op.index+1 > len(Bleve) {
+		return nil, fmt.Errorf("引擎索引过界了")
 	}
 	if doc, e := Bleve[op.index].Document(id); e != nil {
 		slog.Error("", "文档ID错误", e.Error())
@@ -519,6 +531,9 @@ func BleveDocCount(opt ...Option) (uint64, error) {
 	)
 	for _, option := range opt {
 		option(&op)
+	}
+	if op.index+1 > len(Bleve) {
+		return 0, fmt.Errorf("引擎索引过界了")
 	}
 	return Bleve[op.index].DocCount()
 }
