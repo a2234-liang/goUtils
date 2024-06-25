@@ -578,7 +578,7 @@ func BadgerSet(key string, data any, opts ...Option) error {
 			slog.Error("BadgerSet", "错误", e.Error())
 			return e
 		}
-		slog.Info("BadgerSet", "订单写入缓存", key)
+		slog.Info("BadgerSet", "写入缓存", key)
 		return nil
 	})
 	return e
