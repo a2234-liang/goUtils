@@ -563,7 +563,7 @@ func BleveDocCount(opt ...Option) (uint64, error) {
 // 设置缓存key和值以及时效
 func BadgerSet(key string, data any, opts ...Option) error {
 	var (
-		op = options{}
+		op = options{index: 0}
 	)
 	for _, option := range opts {
 		option(&op)
@@ -587,7 +587,7 @@ func BadgerSet(key string, data any, opts ...Option) error {
 // 根据key取缓存
 func BadgerGet(key string, opts ...Option) (any, error) {
 	var (
-		op = options{}
+		op = options{index: 0}
 		b  []byte
 	)
 	for _, option := range opts {
@@ -616,7 +616,7 @@ func BadgerGet(key string, opts ...Option) (any, error) {
 // 删除指定key的缓存
 func BadgerRemove(key string, opts ...Option) error {
 	var (
-		op = options{}
+		op = options{index: 0}
 	)
 	for _, option := range opts {
 		option(&op)
@@ -630,7 +630,7 @@ func BadgerRemove(key string, opts ...Option) error {
 // 判断指定key缓存是否存在
 func BadgerExists(key string, opts ...Option) bool {
 	var (
-		op = options{}
+		op = options{index: 0}
 	)
 	for _, option := range opts {
 		option(&op)
@@ -645,7 +645,7 @@ func BadgerExists(key string, opts ...Option) bool {
 // 批处理新增数据
 func BadgerBatch(dats []map[string]string, opts ...Option) error {
 	var (
-		op = options{}
+		op = options{index: 0}
 	)
 	for _, option := range opts {
 		option(&op)
@@ -668,7 +668,7 @@ func BadgerBatch(dats []map[string]string, opts ...Option) error {
 // 从缓存中只查询对应的key
 func BadgerScanKeyOnly(prefix string, opts ...Option) ([]string, uint64, error) {
 	var (
-		op    = options{}
+		op    = options{index: 0}
 		keys  []string
 		total uint64
 	)
@@ -698,7 +698,7 @@ func BadgerScanKeyOnly(prefix string, opts ...Option) ([]string, uint64, error) 
 // 从缓存中查询对应的key和值
 func BadgerScan(prefix string, opts ...Option) ([]map[string]any, uint64, error) {
 	var (
-		op    = options{}
+		op    = options{index: 0}
 		total uint64
 		m     []map[string]any
 	)
