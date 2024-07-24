@@ -67,9 +67,15 @@ type options struct {
 	idleConns    int
 	maxConns     int
 	maxLifeTime  int
+	noLogs       bool
 }
 type Option func(options *options)
 
+func WithNoLogs(noLogs bool) Option {
+	return func(options *options) {
+		options.noLogs = noLogs
+	}
+}
 func WithDbType(dbtype string) Option {
 	return func(options *options) {
 		options.dbType = dbtype
@@ -203,7 +209,9 @@ func InitBleve(opts ...Option) error {
 				Bleve = append(Bleve, _bleve)
 			}
 		}
-		slog.Info("搜索引擎数据库初始化完成", "索引号", i+1)
+		if !op.noLogs {
+			slog.Info("搜索引擎数据库初始化完成", "索引号", i+1)
+		}
 	}
 	return nil
 }
@@ -225,11 +233,13 @@ func InitBadger(opts ...Option) {
 			os.Exit(1)
 		}
 		CacheDb = append(CacheDb, _cachedb)
-		slog.Info("缓存数据库初始化完成", "索引号", i+1)
+		if !op.noLogs {
+			slog.Info("缓存数据库初始化完成", "索引号", i+1)
+		}
 	}
 }
 
-// 初始化mysql数据库
+// 初始化mysql/postgres数据库
 func InitGormDB(opts ...Option) {
 	var (
 		op        = options{idleConns: 5, maxConns: 100, maxLifeTime: 8, dbType: "mariadb"}
@@ -260,31 +270,9 @@ func InitGormDB(opts ...Option) {
 	sqlDB.SetMaxIdleConns(op.idleConns)
 	sqlDB.SetMaxOpenConns(op.maxConns)
 	sqlDB.SetConnMaxLifetime(time.Hour * time.Duration(op.maxLifeTime))
-	slog.Info("数据库初始化完成", "类型", op.dbType)
-}
-
-// 初始化postgresql数据库
-func InitPsqlDB(opts ...Option) {
-	var (
-		op  = options{idleConns: 5, maxConns: 100, maxLifeTime: 8}
-		err error
-	)
-	for _, option := range opts {
-		option(&op)
+	if !op.noLogs {
+		slog.Info("数据库初始化完成", "类型", op.dbType)
 	}
-	if Db, err = gorm.Open(mysql.Open(op.dsn), &gorm.Config{
-		//dsn=suwen:suwen@36D@tcp(127.0.0.1:3308)/project02?charset=utf8mb4&parseTime=True&loc=Local
-		SkipDefaultTransaction: true,
-		PrepareStmt:            true,
-	}); err != nil {
-		slog.Error(err.Error())
-		os.Exit(1)
-	}
-	sqlDB, _ := Db.DB()
-	sqlDB.SetMaxIdleConns(op.idleConns)
-	sqlDB.SetMaxOpenConns(op.maxConns)
-	sqlDB.SetConnMaxLifetime(time.Hour * time.Duration(op.maxLifeTime))
-	slog.Info("数据库Mariadb初始化完成")
 }
 
 // 初始化redis数据库
@@ -306,7 +294,9 @@ func InitRedis(opts ...Option) {
 		slog.Error(err.Error())
 		os.Exit(1)
 	} else {
-		slog.Info("数据库Redis初始化完成")
+		if !op.noLogs {
+			slog.Info("数据库Redis初始化完成")
+		}
 	}
 
 }
@@ -502,7 +492,9 @@ func BleveIndex(id string, data map[string]any, opts ...Option) error {
 		slog.Error("", "错误", e.Error())
 		return e
 	} else {
-		slog.Info("加入搜索引擎成功", "id", id)
+		if !op.noLogs {
+			slog.Info("加入搜索引擎成功", "id", id)
+		}
 		return nil
 	}
 }
@@ -538,8 +530,8 @@ func BleveDocument(id string, opts ...Option) (map[string]any, error) {
 		slog.Error("", "文档ID错误", e.Error())
 		return nil, e
 	} else {
+		m["nid"] = id
 		for _, v1 := range doc.(*document.Document).Fields {
-			m["id"] = id
 			m[strings.ToLower(v1.Name())] = string(v1.Value())
 		}
 		return m, nil
@@ -578,7 +570,9 @@ func BadgerSet(key string, data any, opts ...Option) error {
 			slog.Error("BadgerSet", "错误", e.Error())
 			return e
 		}
-		slog.Info("BadgerSet", "写入缓存", key)
+		if !op.noLogs {
+			slog.Info("BadgerSet", "写入缓存", key)
+		}
 		return nil
 	})
 	return e
